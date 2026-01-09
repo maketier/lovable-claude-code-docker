@@ -12,9 +12,10 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI
-# This installs the latest version of Claude Code from Anthropic
-RUN curl -fsSL https://raw.githubusercontent.com/anthropics/anthropic-sdk-typescript/main/packages/cli/install.sh | bash
+# Install Claude Code CLI (via npm) and verify it exists
+RUN npm i -g @anthropic-ai/claude-code \
+  && command -v claude-code \
+  && claude-code --version
 
 # Set up workspace directory
 WORKDIR /workspace
