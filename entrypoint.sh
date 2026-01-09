@@ -1,61 +1,58 @@
 #!/bin/bash
-set -e
-
-# Entrypoint script for Claude Code Docker container
-# This script runs when the container starts and handles the generation process
+set -euo pipefail
 
 echo "🤖 Claude Code Docker Container Starting..."
 echo "================================================"
 
-# Validate required environment variables
-if [ -z "$ANTHROPIC_API_KEY" ]; then
-    echo "❌ Error: ANTHROPIC_API_KEY environment variable is required"
-    exit 1
+if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+  echo "❌ Error: ANTHROPIC_API_KEY environment variable is required"
+  exit 1
 fi
 
-if [ -z "$PROMPT" ]; then
-    echo "❌ Error: PROMPT environment variable is required"
-    exit 1
+if [ -z "${PROMPT:-}" ]; then
+  echo "❌ Error: PROMPT environment variable is required"
+  exit 1
 fi
+
+OUTPUT_DIR="${OUTPUT_DIR:-/workspace}"
+KEEP_ALIVE="${KEEP_ALIVE:-false}"
 
 echo "✅ Environment variables validated"
 echo "📝 Prompt: ${PROMPT:0:100}..."
-echo "📂 Output directory: $OUTPUT_DIR"
+echo "📂 Output directory: ${OUTPUT_DIR}"
 echo "================================================"
 
-# Change to output directory
-cd "$OUTPUT_DIR"
+cd "${OUTPUT_DIR}"
 
-# Run Claude Code with the prompt
-echo "🚀 Starting Claude Code generation..."
-echo ""
-
-# Use claude-code CLI to generate the application
-# The --dangerously-skip-permissions flag is safe here because we're in an isolated container
-claude-code --prompt "$PROMPT" --dangerously-skip-permissions
-
-# Check if generation was successful
-if [ $? -eq 0 ]; then
-    echo ""
-    echo "================================================"
-    echo "✅ Generation completed successfully!"
-    echo "📁 Generated files in $OUTPUT_DIR:"
-    ls -lah "$OUTPUT_DIR"
-    echo "================================================"
+# Find the CLI binary (support both names just in case)
+CLI=""
+if command -v claude-code >/dev/null 2>&1; then
+  CLI="claude-code"
+elif command -v claude >/dev/null 2>&1; then
+  CLI="claude"
 else
-    echo ""
-    echo "================================================"
-    echo "❌ Generation failed"
-    echo "================================================"
-    exit 1
+  echo "❌ Neither 'claude-code' nor 'claude' found in PATH."
+  echo "PATH=${PATH}"
+  echo "Contents of /usr/local/bin:"
+  ls -la /usr/local/bin || true
+  exit 1
 fi
 
-# Keep container running so files can be extracted
-echo ""
-echo "📦 Container ready for file extraction"
-echo "💡 Use 'docker exec <container-id> ls /workspace' to see files"
-echo "💡 Use 'docker cp <container-id>:/workspace/. ./output' to copy files"
+echo "🚀 Starting generation using: ${CLI}"
 echo ""
 
-# Sleep indefinitely to keep container alive
-tail -f /dev/null
+# Run generation
+"${CLI}" --prompt "${PROMPT}" --dangerously-skip-permissions
+
+echo ""
+echo "================================================"
+echo "✅ Generation completed successfully!"
+echo "📁 Generated files in ${OUTPUT_DIR}:"
+ls -lah "${OUTPUT_DIR}" || true
+echo "================================================"
+
+if [ "${KEEP_ALIVE}" = "true" ]; then
+  echo ""
+  echo "📦 KEEP_ALIVE=true → container will stay running for extraction"
+  tail -f /dev/null
+fi
