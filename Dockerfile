@@ -2,9 +2,6 @@
 FROM node:20-slim
 
 # System dependencies
-# - bash: your entrypoint uses bash
-# - ca-certificates/curl/git: common tooling
-# - python3/build-essential: often needed by tooling / node-gyp
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
@@ -14,21 +11,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
   && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI via NPM (official documented method)
-# Docs: npm install -g @anthropic-ai/claude-code
+# Install Claude Code CLI (documented npm method)
 RUN npm install -g @anthropic-ai/claude-code \
   && command -v claude \
   && claude --version
 
-# Workspace
-WORKDIR /workspace
-
-# Entrypoint
+# Copy entrypoint
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod 755 /entrypoint.sh
+
+# Create non-root user (required to allow --dangerously-skip-permissions)
+RUN useradd -m -u 10001 appuser \
+  && mkdir -p /workspace \
+  && chown -R appuser:appuser /workspace
 
 # Defaults (override at runtime)
 ENV OUTPUT_DIR="/workspace"
 ENV KEEP_ALIVE="false"
+
+# Run as non-root
+USER appuser
+WORKDIR /workspace
 
 ENTRYPOINT ["/entrypoint.sh"]
