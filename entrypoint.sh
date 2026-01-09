@@ -1,9 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-echo "🤖 Claude Code Docker Container Starting..."
+echo "🤖 Claude Code Container Starting..."
 echo "================================================"
 
+# Required env vars
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
   echo "❌ Error: ANTHROPIC_API_KEY environment variable is required"
   exit 1
@@ -17,40 +18,45 @@ fi
 OUTPUT_DIR="${OUTPUT_DIR:-/workspace}"
 KEEP_ALIVE="${KEEP_ALIVE:-false}"
 
-echo "✅ Environment variables validated"
-echo "📝 Prompt: ${PROMPT:0:100}..."
+echo "✅ Env validated"
 echo "📂 Output directory: ${OUTPUT_DIR}"
+echo "📝 Prompt (first 100 chars): ${PROMPT:0:100}..."
 echo "================================================"
 
+mkdir -p "${OUTPUT_DIR}"
 cd "${OUTPUT_DIR}"
 
-# Find the CLI binary (support both names just in case)
+# Claude Code CLI executable is typically `claude`
+# Be defensive anyway.
 CLI=""
-if command -v claude-code >/dev/null 2>&1; then
-  CLI="claude-code"
-elif command -v claude >/dev/null 2>&1; then
+if command -v claude >/dev/null 2>&1; then
   CLI="claude"
+elif command -v claude-code >/dev/null 2>&1; then
+  CLI="claude-code"
 else
-  echo "❌ Neither 'claude-code' nor 'claude' found in PATH."
+  echo "❌ Claude Code CLI not found (expected 'claude')."
   echo "PATH=${PATH}"
-  echo "Contents of /usr/local/bin:"
+  echo "Listing /usr/local/bin:"
   ls -la /usr/local/bin || true
   exit 1
 fi
 
-echo "🚀 Starting generation using: ${CLI}"
+echo "🚀 Running: ${CLI}"
 echo ""
 
 # Run generation
+# Note: keep flags minimal and stable; add others only if you know you need them.
 "${CLI}" --prompt "${PROMPT}" --dangerously-skip-permissions
 
 echo ""
 echo "================================================"
-echo "✅ Generation completed successfully!"
-echo "📁 Generated files in ${OUTPUT_DIR}:"
+echo "✅ Generation finished"
+echo "📁 Contents of ${OUTPUT_DIR}:"
 ls -lah "${OUTPUT_DIR}" || true
 echo "================================================"
 
+# For automation: default is to exit.
+# For debugging/manual extraction: KEEP_ALIVE=true
 if [ "${KEEP_ALIVE}" = "true" ]; then
   echo ""
   echo "📦 KEEP_ALIVE=true → container will stay running for extraction"
