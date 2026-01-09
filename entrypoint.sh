@@ -46,7 +46,7 @@ echo ""
 
 # Run generation
 # Note: keep flags minimal and stable; add others only if you know you need them.
-"${CLI}" --prompt "${PROMPT}" --dangerously-skip-permissions
+"${CLI}" -p "${PROMPT}" --dangerously-skip-permissions
 
 echo ""
 echo "================================================"
