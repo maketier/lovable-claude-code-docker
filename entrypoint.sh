@@ -27,7 +27,6 @@ mkdir -p "${OUTPUT_DIR}"
 cd "${OUTPUT_DIR}"
 
 # Claude Code CLI executable is typically `claude`
-# Be defensive anyway.
 CLI=""
 if command -v claude >/dev/null 2>&1; then
   CLI="claude"
@@ -44,9 +43,15 @@ fi
 echo "🚀 Running: ${CLI}"
 echo ""
 
-# Run generation
-# Note: keep flags minimal and stable; add others only if you know you need them.
-"${CLI}" -p "${PROMPT}" --dangerously-skip-permissions
+# Run generation (print mode) with non-interactive permissions
+if ! "${CLI}" -p "${PROMPT}" --dangerously-skip-permissions; then
+  echo "❌ Claude command failed."
+  echo "---- ${CLI} --version ----"
+  "${CLI}" --version || true
+  echo "---- ${CLI} --help (first 80 lines) ----"
+  "${CLI}" --help | sed -n '1,80p' || true
+  exit 1
+fi
 
 echo ""
 echo "================================================"
@@ -55,7 +60,6 @@ echo "📁 Contents of ${OUTPUT_DIR}:"
 ls -lah "${OUTPUT_DIR}" || true
 echo "================================================"
 
-# For automation: default is to exit.
 # For debugging/manual extraction: KEEP_ALIVE=true
 if [ "${KEEP_ALIVE}" = "true" ]; then
   echo ""
