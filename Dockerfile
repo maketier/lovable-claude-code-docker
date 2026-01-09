@@ -1,27 +1,33 @@
+# Claude Code Docker Image for Isolated Generation
 FROM node:20-slim
 
-# System deps
-RUN apt-get update && apt-get install -y \
+# System dependencies
+# - bash: your entrypoint uses bash
+# - ca-certificates/curl/git: common tooling
+# - python3/build-essential: often needed by tooling / node-gyp
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
     curl \
     git \
     python3 \
-    python3-pip \
     build-essential \
   && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI via npm (reliable in Docker)
-# NOTE: If the package name differs, we’ll adjust after verifying.
-RUN npm i -g @anthropic-ai/claude-code \
-  && command -v claude-code \
-  && claude-code --version
+# Install Claude Code CLI via NPM (official documented method)
+# Docs: npm install -g @anthropic-ai/claude-code
+RUN npm install -g @anthropic-ai/claude-code \
+  && command -v claude \
+  && claude --version
 
+# Workspace
 WORKDIR /workspace
 
+# Entrypoint
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-ENV ANTHROPIC_API_KEY=""
-ENV PROMPT=""
+# Defaults (override at runtime)
 ENV OUTPUT_DIR="/workspace"
 ENV KEEP_ALIVE="false"
 
