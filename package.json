@@ -1,0 +1,13 @@
+{
+  "name": "lovable-generator",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "generator.js",
+  "scripts": { "start": "node generator.js" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
