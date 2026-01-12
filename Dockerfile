@@ -2,7 +2,6 @@ FROM node:20-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Minimal deps (git is optional, keep if you need it)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ca-certificates \
@@ -13,13 +12,13 @@ RUN mkdir -p /workspace && chown node:node /workspace
 
 WORKDIR /app
 
-# Copy package + install deps
-COPY docker/package.json /app/package.json
+# Install deps
+COPY package.json /app/package.json
 RUN npm install --omit=dev && npm cache clean --force
 
-# Copy app files
-COPY docker/generator.js /app/generator.js
-COPY docker/entrypoint.sh /app/entrypoint.sh
+# Copy generator + entrypoint
+COPY generator.js /app/generator.js
+COPY entrypoint.sh /app/entrypoint.sh
 
 RUN chmod 755 /app/entrypoint.sh && chown -R node:node /app
 
