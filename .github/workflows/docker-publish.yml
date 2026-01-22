@@ -26,6 +26,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ✅ DEBUG STEP 1: Prove what the runner actually has
+      - name: Debug: verify templates exist in runner
+        run: |
+          set -euxo pipefail
+          echo "GIT SHA:"
+          git rev-parse HEAD
+          echo "ROOT:"
+          pwd
+          ls -la
+          echo "TEMPLATES LIST:"
+          ls -la templates || true
+          echo "TEMPLATES TREE (maxdepth 3):"
+          find templates -maxdepth 3 -type f -print || true
+          echo "DOCKERFILE:"
+          ls -la Dockerfile || true
+          echo "DOCKERIGNORE:"
+          ls -la .dockerignore || true
+          echo "---- .dockerignore contents ----"
+          cat .dockerignore || true
+          echo "WORKFLOWS:"
+          ls -la .github/workflows || true
+
       - name: Install cosign
         if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@v3.5.0
@@ -34,6 +56,16 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      # ✅ DEBUG STEP 2: Run a plain docker build (no action wrapper)
+      # This tells us if the issue is BuildKit context vs. action config.
+      - name: Debug: plain docker build
+        run: |
+          set -euxo pipefail
+          docker buildx version
+          docker version
+          echo "Running plain docker build with verbose output..."
+          docker build -f Dockerfile . --progress=plain
 
       - name: Log into registry ghcr.io
         if: github.event_name != 'pull_request'
@@ -59,6 +91,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
