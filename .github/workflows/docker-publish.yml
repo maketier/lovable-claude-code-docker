@@ -10,9 +10,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Sanity check YAML + list repo
+      - name: Prove templates exist in the runner
         run: |
-          pwd
+          set -eux
+          git rev-parse HEAD
           ls -la
-          ls -la .github/workflows || true
-          ls -la templates || true
+          echo "---- templates ----"
+          ls -la templates
+          echo "---- contract files ----"
+          find templates -maxdepth 3 -type f -name "BASE_CONTRACT.md" -print
+
+      - name: Plain docker build (verbose)
+        run: |
+          set -eux
+          docker version
+          docker build -f Dockerfile . --progress=plain
