@@ -1,9 +1,0 @@
-{
-  "id": "next-fullstack",
-  "name": "Next.js Fullstack",
-  "stability": "experimental",
-  "projectType": "nextjs",
-  "healthCheckPath": "/",
-  "requiredFiles": ["package.json", "next.config.js", "app/page.tsx"],
-  "devServerCommand": "npm run dev -- -p 3000 -H 0.0.0.0"
-}

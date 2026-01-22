@@ -1,9 +1,0 @@
-{
-  "id": "static-site",
-  "name": "Static Site",
-  "stability": "stable",
-  "projectType": "static",
-  "healthCheckPath": "/",
-  "requiredFiles": ["index.html"],
-  "devServerCommand": "python3 -m http.server 3000 --bind 0.0.0.0"
-}
