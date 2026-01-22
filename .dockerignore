@@ -1,0 +1,11 @@
+.git
+.github
+node_modules
+dist
+generated-app
+generated-apps
+logs
+.env
+*.log
+.DS_Store
+
