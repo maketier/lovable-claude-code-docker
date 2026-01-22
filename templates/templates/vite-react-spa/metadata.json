@@ -1,0 +1,10 @@
+{
+  "id": "vite-react-spa",
+  "name": "Vite React SPA",
+  "stability": "stable",
+  "projectType": "vite",
+  "healthCheckPath": "/",
+  "requiredFiles": ["package.json", "vite.config.ts", "index.html", "src/main.tsx"],
+  "devServerCommand": "npm run dev -- --host 0.0.0.0 --port 3000",
+  "envVars": {}
+}
