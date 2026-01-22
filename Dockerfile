@@ -1,44 +1,36 @@
 FROM node:20-slim
 
-# Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
     ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/*
 
-# Create workspace and set ownership to existing node user
-RUN mkdir -p /workspace && \
-    chown node:node /workspace
-
-# Set up app directory
+# App directory
 WORKDIR /app
 
-# Copy package files
+# Install deps first (better caching)
 COPY package.json /app/package.json
+RUN npm install --production && npm cache clean --force
 
-# Install Node dependencies
-RUN npm install --production && \
-    npm cache clean --force
-
-# Copy generator and entrypoint
+# Copy runtime files
 COPY generator.js /app/generator.js
 COPY entrypoint.sh /app/entrypoint.sh
 
-# Copy templates for contract loading
-COPY templates /templates
+# Copy templates INSIDE /app and give node ownership
+# (avoids root-level /templates ambiguity and permission surprises)
+COPY --chown=node:node templates /app/templates
 
-# Set permissions and ownership before switching to node user
-RUN chmod +x /app/entrypoint.sh && \
-    chown -R node:node /app
+# Prepare workspace and permissions
+RUN chmod +x /app/entrypoint.sh \
+  && mkdir -p /workspace \
+  && chown -R node:node /app /workspace
 
-# Switch to non-root user
+# Make templates path explicit for generator.js
+ENV TEMPLATES_DIR=/app/templates
+
 USER node
-
-# Set workspace as default directory for generated files
 WORKDIR /workspace
 
-# Entry point
 ENTRYPOINT ["/app/entrypoint.sh"]
