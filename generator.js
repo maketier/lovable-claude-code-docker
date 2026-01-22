@@ -5,31 +5,248 @@ import path from 'path';
 const WORKSPACE = '/workspace';
 const MAX_TURNS = 50;
 const MODEL = 'claude-sonnet-4-20250514';
+const TEMPLATES_DIR = '/templates';
 
-// System prompt with file writing guidelines
+// Contract mapping for project types
+const CONTRACT_MAP = {
+  'nextjs': 'next-fullstack/BASE_CONTRACT.md',
+  'next': 'next-fullstack/BASE_CONTRACT.md',
+  'node': 'node-api/BASE_CONTRACT.md',
+  'api': 'node-api/BASE_CONTRACT.md',
+  'static': 'static-site/BASE_CONTRACT.md',
+  'html': 'static-site/BASE_CONTRACT.md',
+  'vite': 'vite-react-spa/BASE_CONTRACT.md',
+  'react-spa': 'vite-react-spa/BASE_CONTRACT.md',
+  'react': 'vite-react-spa/BASE_CONTRACT.md',
+};
+
+// Required files per project type for validation
+const REQUIRED_FILES = {
+  'static': ['index.html'],
+  'node': ['package.json', ['server.js', 'index.js']], // Either server.js OR index.js
+  'nextjs': ['package.json', 'next.config.js', 'tsconfig.json', 'app/layout.tsx', 'app/page.tsx', 'app/globals.css'],
+  'vite': ['package.json', 'vite.config.ts', 'index.html', 'src/main.tsx', 'src/App.tsx'],
+};
+
+// Forbidden files per project type for validation
+const FORBIDDEN_FILES = {
+  'static': ['package.json'], // Static sites must NOT have package.json
+};
+
+// System prompt with manifest-first workflow
 const SYSTEM_PROMPT = `You are an expert full-stack developer generating production-ready code.
 
-## File Writing Guidelines
+## CRITICAL: Generation Protocol
 
-**Small files (<4KB):** Use write_file directly.
+**Step 1: FILE_MANIFEST (REQUIRED FIRST)**
+Your FIRST response MUST be a FILE_MANIFEST JSON block listing all files you plan to create:
+\`\`\`json
+{
+  "files": [
+    { "path": "package.json", "purpose": "Dependencies", "estimated_bytes": 500 },
+    { "path": "src/App.tsx", "purpose": "Main component", "estimated_bytes": 2000 }
+  ]
+}
+\`\`\`
 
-**Large files (>4KB, especially CSS/JS):** Use chunked writing:
-1. First chunk: write_file({ path: "styles.css", content: "/* Part 1 */\\n..." }) - this overwrites/creates
-2. Subsequent chunks: append_file({ path: "styles.css", content: "/* Part 2 */\\n..." })
-3. Keep each chunk under 8KB
+**Step 2: Write Files**
+After manifest, write files using tools. Follow these rules:
 
-**Why this matters:** Large files can cause max_tokens truncation, resulting in incomplete writes. Using write_file for the first chunk ensures idempotent retries (overwrites on retry). Using append_file for subsequent chunks adds content incrementally.
+## File Size Limits (STRICT)
+- **Maximum file size: 32KB** - Files larger than this will be rejected
+- **Recommended chunking threshold: 8KB** - Split larger files
+- **Chunking method:** Use write_file for first chunk, append_file for subsequent chunks
 
-## Best Practices
-- Prefer minimal, inline styles when possible - avoid verbose CSS
-- Keep CSS concise: use shorthand properties, avoid redundant rules
-- Split large CSS into logical sections only when necessary
-- For JavaScript, write modular code in separate files when appropriate
-- Prioritize functionality over elaborate styling`;
+## Writing Rules
+- Prefer multiple small files over one large file
+- No external CDNs unless explicitly requested
+- Keep CSS minimal; prefer component-level styles
+- For files >8KB: write_file (first chunk) + append_file (subsequent chunks, ≤8KB each)
+
+## If max_tokens truncates your response
+You MUST continue by chunking the current file using append_file (≤8KB each). Do not restart or repeat content.`;
 
 // Track repeated failures per tool+key for circuit breaker
 const failureTracker = new Map();
 const MAX_REPEATED_FAILURES = 3;
+
+/**
+ * Load contract for a project type
+ */
+function getContract(projectType) {
+  if (!projectType) return null;
+  const contractPath = CONTRACT_MAP[projectType.toLowerCase()];
+  if (!contractPath) {
+    console.warn(`⚠️ Unknown project type: ${projectType}, no contract loaded`);
+    return null;
+  }
+  const fullPath = path.join(TEMPLATES_DIR, contractPath);
+  try {
+    if (fs.existsSync(fullPath)) {
+      return fs.readFileSync(fullPath, 'utf8');
+    }
+    console.warn(`⚠️ Contract not found: ${fullPath}`);
+    return null;
+  } catch (err) {
+    console.warn(`⚠️ Could not read contract: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * Infer project type from prompt
+ */
+function inferProjectType(prompt) {
+  const lower = prompt.toLowerCase();
+  if (lower.includes('next.js') || lower.includes('nextjs')) return 'nextjs';
+  if (lower.includes('express') || lower.includes('api server') || lower.includes('backend')) return 'node';
+  if (lower.includes('react') || lower.includes('vite') || lower.includes('spa')) return 'vite';
+  if (lower.includes('static') || lower.includes('html') || lower.includes('landing page')) return 'static';
+  return 'static'; // default fallback
+}
+
+/**
+ * Get project type from env or infer from prompt
+ */
+function getProjectType(prompt) {
+  const envType = process.env.PROJECT_TYPE;
+  if (envType) {
+    console.log(`📋 Project type: ${envType} (source: env)`);
+    return envType;
+  }
+  const inferred = inferProjectType(prompt);
+  console.log(`📋 Project type: ${inferred} (source: inferred)`);
+  return inferred;
+}
+
+/**
+ * Extract FILE_MANIFEST from assistant response
+ */
+function extractManifest(content) {
+  for (const block of content) {
+    if (block.type === 'text') {
+      const match = block.text.match(/```json\s*\n(\{[\s\S]*?"files"[\s\S]*?\})\s*\n```/);
+      if (match) {
+        try {
+          const manifest = JSON.parse(match[1]);
+          if (manifest.files && Array.isArray(manifest.files)) {
+            return manifest;
+          }
+        } catch {}
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Validate workspace after generation
+ */
+function validateWorkspace(projectType) {
+  const errors = [];
+  const warnings = [];
+
+  // Normalize project type
+  const typeKey = projectType?.toLowerCase() || 'static';
+  const normalizedType =
+    ['nextjs', 'next'].includes(typeKey) ? 'nextjs' :
+    ['node', 'api'].includes(typeKey) ? 'node' :
+    ['vite', 'react-spa', 'react'].includes(typeKey) ? 'vite' :
+    'static';
+
+  // Check required files
+  const required = REQUIRED_FILES[normalizedType] || [];
+  for (const req of required) {
+    if (Array.isArray(req)) {
+      // Either/or requirement
+      const found = req.some(f => fs.existsSync(path.join(WORKSPACE, f)));
+      if (!found) {
+        errors.push(`Missing required file: one of [${req.join(', ')}]`);
+      }
+    } else {
+      if (!fs.existsSync(path.join(WORKSPACE, req))) {
+        errors.push(`Missing required file: ${req}`);
+      }
+    }
+  }
+
+  // Check forbidden files
+  const forbidden = FORBIDDEN_FILES[normalizedType] || [];
+  for (const f of forbidden) {
+    if (fs.existsSync(path.join(WORKSPACE, f))) {
+      errors.push(`Forbidden file for ${normalizedType}: ${f}`);
+    }
+  }
+
+  // Check file sizes (max 32KB)
+  function checkSizes(dir, prefix = '') {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        checkSizes(fullPath, relPath);
+      } else {
+        const stat = fs.statSync(fullPath);
+        if (stat.size > 32 * 1024) {
+          errors.push(`File too large (>${32}KB): ${relPath} (${Math.round(stat.size/1024)}KB)`);
+        } else if (stat.size > 16 * 1024) {
+          warnings.push(`Large file (>${16}KB): ${relPath} (${Math.round(stat.size/1024)}KB)`);
+        }
+      }
+    }
+  }
+
+  try {
+    checkSizes(WORKSPACE);
+  } catch (err) {
+    warnings.push(`Could not check file sizes: ${err.message}`);
+  }
+
+  // Node-specific: check for /health endpoint
+  if (normalizedType === 'node') {
+    const serverFiles = ['server.js', 'index.js', 'src/server.js', 'src/index.js'];
+    let hasHealth = false;
+    for (const sf of serverFiles) {
+      const fp = path.join(WORKSPACE, sf);
+      if (fs.existsSync(fp)) {
+        const content = fs.readFileSync(fp, 'utf8');
+        if (/['"`]\/health['"`]/.test(content) || /get\s*\(\s*['"`]\/health/.test(content)) {
+          hasHealth = true;
+          break;
+        }
+      }
+    }
+    if (!hasHealth) {
+      errors.push('Node API must have GET /health endpoint');
+    }
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings
+  };
+}
+
+/**
+ * Print workspace contents
+ */
+function printWorkspaceContents() {
+  console.log('📁 Contents of /workspace:');
+  try {
+    const result = executeTool('list_directory', { path: '.' });
+    if (result.success && result.items) {
+      console.log(`total ${result.items.length}`);
+      result.items.forEach(item => {
+        const icon = item.type === 'directory' ? '📂' : '📄';
+        console.log(`${icon} ${item.name}`);
+      });
+    }
+  } catch (error) {
+    console.log('(Could not list workspace contents)');
+  }
+}
 
 // Tool definitions for Claude
 const TOOLS = [
@@ -369,6 +586,21 @@ async function generate() {
     throw new Error('PROMPT environment variable is required');
   }
 
+  // Get project type
+  const projectType = getProjectType(prompt);
+
+  // Load contract
+  const contract = getContract(projectType);
+  if (contract) {
+    console.log(`📜 Contract loaded for: ${projectType}`);
+  }
+
+  // Build full prompt with contract
+  let fullPrompt = prompt;
+  if (contract) {
+    fullPrompt = `## Base Contract\n\n${contract}\n\n---\n\n## User Request\n\n${prompt}\n\n---\n\n## Generation Protocol Reminder\n1. First output FILE_MANIFEST JSON\n2. Then write files using tools`;
+  }
+
   console.log('🔑 API key validated');
   console.log(`📝 Prompt: ${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}`);
   console.log(`🤖 Model: ${MODEL}`);
@@ -379,7 +611,7 @@ async function generate() {
   // Initial message from user
   const messages = [{
     role: 'user',
-    content: prompt
+    content: fullPrompt
   }];
 
   let turnCount = 0;
@@ -415,14 +647,38 @@ async function generate() {
         content: response.content
       });
 
+      // Process tool uses
+      const toolUses = response.content.filter(block => block.type === 'tool_use');
+
+      // Check for manifest (before tool use check)
+      const manifest = extractManifest(response.content);
+      if (manifest && toolUses.length === 0) {
+        console.log(`📋 FILE_MANIFEST received (${manifest.files.length} files planned)`);
+        manifest.files.forEach(f => console.log(`   - ${f.path} (~${f.estimated_bytes || '?'} bytes)`));
+
+        // Auto-approve and prompt to continue
+        messages.push({
+          role: 'user',
+          content: 'Manifest accepted. Now write the files.'
+        });
+        continue; // Next turn
+      }
+
       // Check if task is complete
       if (response.stop_reason === 'end_turn') {
         console.log('\n✅ Generation complete');
         break;
       }
 
-      // Process tool uses
-      const toolUses = response.content.filter(block => block.type === 'tool_use');
+      // Handle max_tokens recovery
+      if (response.stop_reason === 'max_tokens') {
+        console.log('⚠️ Response hit max_tokens, sending recovery nudge...');
+        messages.push({
+          role: 'user',
+          content: 'Your last message hit max_tokens and was truncated. You MUST continue by chunking the current file using append_file (≤8KB each). Do not repeat content that was already written.'
+        });
+        // Don't break, continue the loop
+      }
 
       if (toolUses.length === 0) {
         console.log('\n✅ No more tools to execute, generation complete');
@@ -504,6 +760,14 @@ async function generate() {
     console.log(`\n⚠️ Reached maximum turns (${MAX_TURNS}), stopping`);
   }
 
+  // Run post-generation validation
+  const validation = validateWorkspace(projectType);
+
+  if (validation.warnings.length > 0) {
+    console.log('\n⚠️ VALIDATION WARNINGS:');
+    validation.warnings.forEach(w => console.log(`   - ${w}`));
+  }
+
   // Print summary (always print artifacts even on failure)
   console.log('\n================================================');
   if (circuitBreakerResult) {
@@ -512,23 +776,14 @@ async function generate() {
     console.log(`   Path: ${circuitBreakerResult.path || 'N/A'}`);
     console.log(`   Error: ${circuitBreakerResult.last_error}`);
     console.log(`   Hint: ${circuitBreakerResult.hint}`);
+  } else if (!validation.ok) {
+    console.log('❌ VALIDATION FAILED:');
+    validation.errors.forEach(e => console.log(`   - ${e}`));
   } else {
     console.log('✅ Generation finished');
   }
-  console.log('📁 Contents of /workspace:');
 
-  try {
-    const result = executeTool('list_directory', { path: '.' });
-    if (result.success && result.items) {
-      console.log(`total ${result.items.length}`);
-      result.items.forEach(item => {
-        const icon = item.type === 'directory' ? '📂' : '📄';
-        console.log(`${icon} ${item.name}`);
-      });
-    }
-  } catch (error) {
-    console.log('(Could not list workspace contents)');
-  }
+  printWorkspaceContents();
 
   console.log('================================================');
   console.log(`\n💰 Total tokens: ${totalInputTokens + totalOutputTokens}`);
@@ -545,6 +800,11 @@ async function generate() {
   if (circuitBreakerResult) {
     return circuitBreakerResult;
   }
+
+  if (!validation.ok) {
+    return { success: false, error_code: 'VALIDATION_FAILED', errors: validation.errors };
+  }
+
   return { success: true, turns: turnCount, tokens: totalInputTokens + totalOutputTokens };
 }
 
