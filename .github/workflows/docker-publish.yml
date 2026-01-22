@@ -26,8 +26,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ✅ DEBUG STEP 1: Prove what the runner actually has
       - name: Debug: verify templates exist in runner
+        shell: bash
         run: |
           set -euxo pipefail
           echo "GIT SHA:"
@@ -57,9 +57,8 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # ✅ DEBUG STEP 2: Run a plain docker build (no action wrapper)
-      # This tells us if the issue is BuildKit context vs. action config.
       - name: Debug: plain docker build
+        shell: bash
         run: |
           set -euxo pipefail
           docker buildx version
@@ -103,4 +102,7 @@ jobs:
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
           DIGEST: ${{ steps.build-and-push.outputs.digest }}
-        run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
